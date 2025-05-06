@@ -1,2 +1,33 @@
 php artisan serve --host=192.168.216.64 --port=8000 (to run on rushi's hotspot)
 
+
+
+
+XAMPP (includes PHP and MySQL)
+Download from: https://www.apachefriends.org/index.html
+
+Composer (PHP package manager)
+Download from: https://getcomposer.org/download/
+
+composer install
+
+
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=your_db_name
+DB_USERNAME=root
+DB_PASSWORD=
+
+
+
+php artisan key:generate
+
+
+
+
+php artisan migrate
+
+
+
+
