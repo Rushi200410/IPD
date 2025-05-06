@@ -1,0 +1,166 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <DHT.h>
+
+// ======= Wi-Fi Credentials =======
+const char* ssid = "Rushi";           // Your hotspot name
+const char* password = "12345678";    // Your hotspot password
+
+// ======= Laravel Server URL =======
+const char* serverName = "http://192.168.216.64:8000/api/esp32-data";
+
+// ======= Sensor Pins and Setup =======
+#define TRIG_PIN 5
+#define ECHO_PIN 18
+#define DHT_PIN 4
+
+#define LED_WATER_HIGH 25
+#define LED_WATER_MEDIUM 26
+#define LED_WATER_LOW 27
+#define LED_TEMPERATURE 32
+#define LED_HUMIDITY 33
+
+DHT dht(DHT_PIN, DHT22);
+
+// ======= Timers =======
+unsigned long previousMillis = 0;
+const long interval = 5000;
+
+void setup() {
+  Serial.begin(115200);
+
+  // Initialize Pins
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  pinMode(LED_WATER_HIGH, OUTPUT);
+  pinMode(LED_WATER_MEDIUM, OUTPUT);
+  pinMode(LED_WATER_LOW, OUTPUT);
+  pinMode(LED_TEMPERATURE, OUTPUT);
+  pinMode(LED_HUMIDITY, OUTPUT);
+
+  dht.begin();
+
+  // Connect to WiFi
+  Serial.println("🔄 Connecting to WiFi...");
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  int retryCount = 0;
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+    retryCount++;
+    if (retryCount >= 30) {
+      Serial.println("\n❌ Failed to connect to WiFi.");
+      return;
+    }
+  }
+  Serial.println("\n✅ Connected to WiFi!");
+  Serial.print("📶 IP Address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void loop() {
+  unsigned long currentMillis = millis();
+
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
+
+    // Read sensors
+    float distance = measureDistance();
+    float temperature = dht.readTemperature();
+    float humidity = dht.readHumidity();
+
+    Serial.printf("📏 Distance: %.2f cm | 🌡 Temp: %.2f °C | 💧 Humidity: %.2f%%\n", distance, temperature, humidity);
+
+    // Indicate with LEDs
+    indicateWaterLevel(distance);
+    blinkForTemperature(temperature);
+    blinkForHumidity(humidity);
+
+    // Send to Laravel
+    sendDataToServer(distance, temperature, humidity);
+  }
+}
+
+// ======= Measure Water Distance =======
+float measureDistance() {
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  long duration = pulseIn(ECHO_PIN, HIGH, 25000);
+  if (duration == 0) return 999;
+  return duration * 0.034 / 2;
+}
+
+// ======= LED Indications =======
+void indicateWaterLevel(float distance) {
+  digitalWrite(LED_WATER_HIGH, LOW);
+  digitalWrite(LED_WATER_MEDIUM, LOW);
+  digitalWrite(LED_WATER_LOW, LOW);
+
+  if (distance > 60) {
+    digitalWrite(LED_WATER_HIGH, HIGH);
+  } else if (distance >= 30 && distance <= 60) {
+    digitalWrite(LED_WATER_HIGH, HIGH);
+    digitalWrite(LED_WATER_MEDIUM, HIGH);
+  } else {
+    digitalWrite(LED_WATER_HIGH, HIGH);
+    digitalWrite(LED_WATER_MEDIUM, HIGH);
+    digitalWrite(LED_WATER_LOW, HIGH);
+  }
+}
+
+void blinkForTemperature(float temp) {
+  int blinks = (temp < 20) ? 1 : (temp <= 30) ? 2 : 3;
+  blinkLED(LED_TEMPERATURE, blinks);
+}
+
+void blinkForHumidity(float humidity) {
+  int blinks = (humidity < 40) ? 1 : (humidity <= 60) ? 2 : 3;
+  blinkLED(LED_HUMIDITY, blinks);
+}
+
+void blinkLED(int ledPin, int count) {
+  for (int i = 0; i < count; i++) {
+    digitalWrite(ledPin, HIGH);
+    delay(200);
+    digitalWrite(ledPin, LOW);
+    delay(200);
+  }
+}
+
+// ======= Send Data to Laravel Server =======
+void sendDataToServer(float distance, float temperature, float humidity) {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    http.begin(serverName);
+    http.addHeader("Content-Type", "application/json");
+
+    // ✅ Use default values if any are invalid
+    if (isnan(distance) || distance == 999) distance = 100.0;
+    if (isnan(temperature)) temperature = 100.0;
+    if (isnan(humidity)) humidity = 100.0;
+
+    // Prepare JSON
+    String jsonData = "{\"water_level\":" + String(distance) +
+                      ",\"temperature\":" + String(temperature) +
+                      ",\"humidity\":" + String(humidity) + "}";
+
+    Serial.println("📤 Sending JSON: " + jsonData); // Debug print
+
+    int httpResponseCode = http.POST(jsonData);
+
+    if (httpResponseCode > 0) {
+      Serial.println("✅ Data sent: " + String(httpResponseCode));
+    } else {
+      Serial.println("❌ Failed to send data.");
+    }
+
+    http.end();
+  } else {
+    Serial.println("⚠️ WiFi disconnected.");
+  }
+}

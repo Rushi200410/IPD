@@ -1,0 +1,2 @@
+php artisan serve --host=192.168.216.64 --port=8000 (to run on rushi's hotspot)
+
